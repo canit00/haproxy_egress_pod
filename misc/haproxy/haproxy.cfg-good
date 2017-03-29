@@ -1,0 +1,79 @@
+global
+  maxconn 20000
+  chroot /var/lib/haproxy
+  user haproxy
+  group haproxy
+  log 127.0.0.1 local2 debug
+  #ssl-server-verify none
+  daemon
+
+  # Intermediate cipher suite (default) from https://wiki.mozilla.org/Security/Server_Side_TLS
+  tune.ssl.default-dh-param 2048
+  ssl-default-bind-ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-DSS-AES128-GCM-SHA256:kEDH+AESGCM:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA256:DHE-RSA-AES256-SHA256:DHE-DSS-AES256-SHA:DHE-RSA-AES256-SHA:ECDHE-RSA-DES-CBC3-SHA:ECDHE-ECDSA-DES-CBC3-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:AES:CAMELLIA:DES-CBC3-SHA:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!aECDH:!EDH-DSS-DES-CBC3-SHA:!EDH-RSA-DES-CBC3-SHA:!KRB5-DES-CBC3-SHA
+  
+defaults
+  maxconn                 20000
+  mode			  tcp
+  log                     global
+  option 		  tcplog
+  retries                 3
+  timeout http-request    10s
+  timeout queue           1m
+  timeout connect         5s
+  timeout client          30s
+  timeout server          30s
+  timeout http-keep-alive 300s
+  timeout check           10s
+  maxconn                 20000
+  timeout tunnel          1h
+  compression algo        gzip
+  compression type        "text/html text/plain text/css"
+  
+  # To configure custom default errors, you can either uncomment the
+  # line below (server ... 127.0.0.1:8080) and point it to your custom
+  # backend service or alternatively, you can send a custom 503 error.
+  #
+  # server openshift_backend 127.0.0.1:8080
+  #errorfile 503 /var/lib/haproxy/conf/error-page-503.http
+	
+frontend http-in
+  bind *:80
+  mode http
+  option httplog
+  tcp-request inspect-delay 5s
+  tcp-request content accept if HTTP
+  default_backend openshift_default
+
+frontend https-in 
+  mode tcp
+  bind *:443 
+  option tcplog
+  option socket-stats
+  tcp-request inspect-delay 5s
+  #tcp-request content accept if { req_ssl_hello_type 1 }
+  default_backend openshift_default_ssl
+
+backend openshift_default
+  mode http
+  option httplog
+  option forwardfor
+  option http-pretend-keepalive
+  server app1 ipwookie.com:80
+
+backend openshift_default_ssl  
+  mode tcp
+  option tcplog
+  #stick-table type binary len 32 size 30k expire 30m
+  #acl clienthello req_ssl_hello_type 1
+  #acl serverhello rep_ssl_hello_type 2
+  tcp-request inspect-delay 5s
+  #tcp-request content accept if clienthello
+  #tcp-response content accept if serverhello
+  #stick on payload_lv(43,1) if clienthello
+  stick-table type ip size 100k expire 30s store conn_cur,conn_rate(3s),http_req_rate(10s)
+  #tcp-request content track-sc2 src
+  #stick store-response payload_lv(43,1) if serverhello
+  option ssl-hello-chk
+  server app2 github.com:443 check
+  server app3 google.com:443 check
+
